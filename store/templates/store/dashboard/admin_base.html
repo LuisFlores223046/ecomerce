@@ -86,6 +86,9 @@
                     <a href="{% url 'category_list' %}" class="{% if '/admin-dashboard/categories/' in request.path %}active{% endif %}">
                         <i class="fas fa-tags me-2"></i>Categories
                     </a>
+                    <a href="{% url 'order_list' %}" class="{% if '/admin-dashboard/orders/' in request.path %}active{% endif %}">
+                        <i class="fas fa-shopping-basket me-2"></i>Orders
+                    </a>
                 </div>
             </div>
             
