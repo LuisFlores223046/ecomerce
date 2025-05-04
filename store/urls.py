@@ -58,5 +58,12 @@ cart_urlpatterns = [
     path('remove-from-cart/<int:product_id>/', views.remove_from_cart, name="remove_from_cart"),  # Eliminar producto
 ]
 
-# Combinar todas las URLs
-urlpatterns = auth_urlpatterns + customer_urlpatterns + admin_urlpatterns + order_urlpatterns + cart_urlpatterns
+# URLs para cuentas de cliente
+account_urlpatterns = [
+    path('my-account/', views.my_account, name="my_account"),  # Mi cuenta
+    path('my-orders/', views.my_orders, name="my_orders"),  # Mis pedidos
+    path('my-orders/<int:pk>/', views.order_customer_detail, name="order_customer_detail"),  # Detalle de pedido
+]
+
+# Modificar la línea final de urlpatterns para incluir las nuevas URLs
+urlpatterns = auth_urlpatterns + customer_urlpatterns + admin_urlpatterns + order_urlpatterns + cart_urlpatterns + account_urlpatterns

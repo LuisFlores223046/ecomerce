@@ -8,18 +8,12 @@ import time  # Para generar IDs de transacción
 
 # Función para verificar si un usuario es administrador
 def is_admin(user):
-    """
-    Verifica si un usuario tiene permisos de administrador.
-    Se utiliza como condición en el decorador user_passes_test.
-    """
+    """Verifica permisos de administrador."""
     return user.is_staff
 
 # Vistas de autenticación
 def login_view(request):
-    """
-    Vista para el inicio de sesión de usuarios.
-    Procesa el formulario de login y redirecciona según el tipo de usuario.
-    """
+    """Procesa inicio de sesión y redirecciona según tipo de usuario."""
     if request.method == 'POST':
         form = LoginForm(request, data=request.POST)
         if form.is_valid():
@@ -38,10 +32,7 @@ def login_view(request):
     return render(request, 'store/login.html', {'form': form})
 
 def register_view(request):
-    """
-    Vista para el registro de nuevos usuarios.
-    Procesa el formulario de registro y crea un nuevo usuario no staff.
-    """
+    """Procesa registro de nuevos usuarios."""
     if request.method == 'POST':
         form = RegistrationForm(request.POST)
         if form.is_valid():
@@ -56,29 +47,20 @@ def register_view(request):
     return render(request, 'store/register.html', {'form': form})
 
 def logout_view(request):
-    """
-    Vista para cerrar sesión.
-    Cierra la sesión del usuario y redirecciona a la página de login.
-    """
+    """Cierra sesión y redirecciona a login."""
     logout(request)
     return redirect('login')
 
 # Store main views
 def store(request):
-    """
-    Vista principal de la tienda.
-    Muestra productos disponibles y categorías.
-    """
+    """Muestra productos y categorías disponibles."""
     products = Product.objects.filter(is_available=True)  # Solo productos disponibles
     categories = Category.objects.all()
     context = {'products': products, 'categories': categories}
     return render(request, 'store/store.html', context)
 
 def customer_product_detail(request, pk):
-    """
-    Vista de detalle de producto para clientes.
-    Muestra información detallada del producto y productos relacionados.
-    """
+    """Muestra detalle de producto y productos relacionados."""
     product = get_object_or_404(Product, pk=pk)
     related_products = Product.objects.filter(category=product.category).exclude(pk=pk)[:4]  # Máximo 4 productos relacionados
     context = {
@@ -88,10 +70,7 @@ def customer_product_detail(request, pk):
     return render(request, 'store/customer_product_detail.html', context)
 
 def customer_category_detail(request, pk):
-    """
-    Vista de detalle de categoría para clientes.
-    Muestra información de la categoría y los productos asociados.
-    """
+    """Muestra categoría y sus productos disponibles."""
     category = get_object_or_404(Category, pk=pk)
     products = category.products.filter(is_available=True)  # Solo productos disponibles
     context = {
@@ -103,11 +82,7 @@ def customer_category_detail(request, pk):
 # Cart views
 @login_required
 def add_to_cart(request, product_id):
-    """
-    Vista para añadir un producto al carrito.
-    Si el producto ya está en el carrito, incrementa la cantidad.
-    Requiere que el usuario esté autenticado.
-    """
+    """Añade producto al carrito o incrementa cantidad."""
     product = get_object_or_404(Product, id=product_id)
     
     # Obtener o crear un pedido en estado pendiente para el usuario
@@ -135,11 +110,7 @@ def add_to_cart(request, product_id):
 
 @login_required
 def update_cart(request, product_id, action):
-    """
-    Vista para actualizar la cantidad de un producto en el carrito.
-    Permite aumentar o disminuir la cantidad, y elimina el ítem si la cantidad es 1 y se disminuye.
-    Requiere que el usuario esté autenticado.
-    """
+    """Actualiza cantidad de producto en carrito."""
     product = get_object_or_404(Product, id=product_id)
     customer = request.user.customer
     order = Order.objects.filter(customer=customer, complete=False).first()
@@ -165,10 +136,7 @@ def update_cart(request, product_id, action):
 
 @login_required
 def remove_from_cart(request, product_id):
-    """
-    Vista para eliminar completamente un producto del carrito.
-    Requiere que el usuario esté autenticado.
-    """
+    """Elimina producto del carrito."""
     product = get_object_or_404(Product, id=product_id)
     customer = request.user.customer
     order = Order.objects.filter(customer=customer, complete=False).first()
@@ -181,10 +149,7 @@ def remove_from_cart(request, product_id):
 
 @login_required
 def cart(request):
-    """
-    Vista para mostrar el carrito de compras.
-    Requiere que el usuario esté autenticado.
-    """
+    """Muestra carrito de compras actual."""
     customer = request.user.customer
     order = Order.objects.filter(customer=customer, complete=False).first()
     
@@ -203,11 +168,7 @@ def cart(request):
 
 @login_required
 def checkout(request):
-    """
-    Vista para procesar el checkout.
-    Muestra el formulario de checkout y procesa la orden cuando se envía.
-    Requiere que el usuario esté autenticado.
-    """
+    """Procesa página de pago y finalización de pedido."""
     customer = request.user.customer
     order = Order.objects.filter(customer=customer, complete=False).first()
     
@@ -240,11 +201,7 @@ def checkout(request):
 # Admin dashboard
 @user_passes_test(is_admin)
 def dashboard(request):
-    """
-    Vista principal del dashboard administrativo.
-    Muestra estadísticas y listas de productos y órdenes recientes.
-    Solo accesible para usuarios administradores.
-    """
+    """Dashboard administrativo con estadísticas."""
     # Contadores para las tarjetas de estadísticas
     product_count = Product.objects.count()
     category_count = Category.objects.count()
@@ -266,29 +223,19 @@ def dashboard(request):
 # Product CRUD operations
 @user_passes_test(is_admin)
 def product_list(request):
-    """
-    Vista para listar todos los productos.
-    Solo accesible para usuarios administradores.
-    """
+    """Lista productos para administración."""
     products = Product.objects.all()
     return render(request, 'store/dashboard/product_list.html', {'products': products})
 
 @user_passes_test(is_admin)
 def product_detail(request, pk):
-    """
-    Vista para mostrar detalles de un producto específico.
-    Solo accesible para usuarios administradores.
-    """
+    """Detalle de producto para administración."""
     product = get_object_or_404(Product, pk=pk)
     return render(request, 'store/dashboard/product_detail.html', {'product': product})
 
 @user_passes_test(is_admin)
 def product_create(request):
-    """
-    Vista para crear un nuevo producto.
-    Procesa el formulario de creación de producto.
-    Solo accesible para usuarios administradores.
-    """
+    """Crea nuevo producto."""
     if request.method == 'POST':
         form = ProductForm(request.POST, request.FILES)  # request.FILES para manejar la imagen
         if form.is_valid():
@@ -305,11 +252,7 @@ def product_create(request):
 
 @user_passes_test(is_admin)
 def product_update(request, pk):
-    """
-    Vista para actualizar un producto existente.
-    Procesa el formulario de edición de producto.
-    Solo accesible para usuarios administradores.
-    """
+    """Actualiza producto existente."""
     product = get_object_or_404(Product, pk=pk)
     
     if request.method == 'POST':
@@ -329,11 +272,7 @@ def product_update(request, pk):
 
 @user_passes_test(is_admin)
 def product_delete(request, pk):
-    """
-    Vista para eliminar un producto.
-    Muestra confirmación y procesa la eliminación.
-    Solo accesible para usuarios administradores.
-    """
+    """Elimina producto con confirmación."""
     product = get_object_or_404(Product, pk=pk)
     
     if request.method == 'POST':
@@ -347,20 +286,13 @@ def product_delete(request, pk):
 # Category CRUD operations
 @user_passes_test(is_admin)
 def category_list(request):
-    """
-    Vista para listar todas las categorías.
-    Solo accesible para usuarios administradores.
-    """
+    """Lista categorías para administración."""
     categories = Category.objects.all()
     return render(request, 'store/dashboard/category_list.html', {'categories': categories})
 
 @user_passes_test(is_admin)
 def category_detail(request, pk):
-    """
-    Vista para mostrar detalles de una categoría específica.
-    Incluye los productos asociados a esta categoría.
-    Solo accesible para usuarios administradores.
-    """
+    """Detalle de categoría y sus productos."""
     category = get_object_or_404(Category, pk=pk)
     products = category.products.all()  # Todos los productos de esta categoría
     return render(request, 'store/dashboard/category_detail.html', {
@@ -370,11 +302,7 @@ def category_detail(request, pk):
 
 @user_passes_test(is_admin)
 def category_create(request):
-    """
-    Vista para crear una nueva categoría.
-    Procesa el formulario de creación de categoría.
-    Solo accesible para usuarios administradores.
-    """
+    """Crea nueva categoría."""
     if request.method == 'POST':
         form = CategoryForm(request.POST)
         if form.is_valid():
@@ -391,11 +319,7 @@ def category_create(request):
 
 @user_passes_test(is_admin)
 def category_update(request, pk):
-    """
-    Vista para actualizar una categoría existente.
-    Procesa el formulario de edición de categoría.
-    Solo accesible para usuarios administradores.
-    """
+    """Actualiza categoría existente."""
     category = get_object_or_404(Category, pk=pk)
     
     if request.method == 'POST':
@@ -415,12 +339,7 @@ def category_update(request, pk):
 
 @user_passes_test(is_admin)
 def category_delete(request, pk):
-    """
-    Vista para eliminar una categoría.
-    Muestra confirmación y procesa la eliminación.
-    Al eliminar una categoría, también se eliminan todos sus productos asociados.
-    Solo accesible para usuarios administradores.
-    """
+    """Elimina categoría con confirmación."""
     category = get_object_or_404(Category, pk=pk)
     
     if request.method == 'POST':
@@ -434,30 +353,19 @@ def category_delete(request, pk):
 # Order CRUD operations
 @user_passes_test(is_admin)
 def order_list(request):
-    """
-    Vista para listar todas las órdenes.
-    Solo accesible para usuarios administradores.
-    """
+    """Lista órdenes para administración."""
     orders = Order.objects.all()
     return render(request, 'store/dashboard/order_list.html', {'orders': orders})
 
 @user_passes_test(is_admin)
 def order_detail(request, pk):
-    """
-    Vista para mostrar detalles de una orden específica.
-    Incluye todos los ítems de la orden.
-    Solo accesible para usuarios administradores.
-    """
+    """Detalle de orden y sus productos."""
     order = get_object_or_404(Order, pk=pk)
     return render(request, 'store/dashboard/order_detail.html', {'order': order})
 
 @user_passes_test(is_admin)
 def order_update(request, pk):
-    """
-    Vista para actualizar una orden existente.
-    Permite cambiar el estado y la dirección de envío.
-    Solo accesible para usuarios administradores.
-    """
+    """Actualiza estado y dirección de orden."""
     order = get_object_or_404(Order, pk=pk)
     
     if request.method == 'POST':
@@ -477,12 +385,7 @@ def order_update(request, pk):
 
 @user_passes_test(is_admin)
 def order_delete(request, pk):
-    """
-    Vista para eliminar una orden.
-    Muestra confirmación y procesa la eliminación.
-    Al eliminar una orden, también se eliminan todos sus ítems asociados.
-    Solo accesible para usuarios administradores.
-    """
+    """Elimina orden con confirmación."""
     order = get_object_or_404(Order, pk=pk)
     
     if request.method == 'POST':
@@ -495,11 +398,7 @@ def order_delete(request, pk):
 
 @user_passes_test(is_admin)
 def add_order_item(request, pk):
-    """
-    Vista para añadir un ítem a una orden existente.
-    Procesa el formulario de creación de ítem.
-    Solo accesible para usuarios administradores.
-    """
+    """Añade producto a una orden."""
     order = get_object_or_404(Order, pk=pk)
     
     if request.method == 'POST':
@@ -521,11 +420,7 @@ def add_order_item(request, pk):
 
 @user_passes_test(is_admin)
 def edit_order_item(request, pk):
-    """
-    Vista para editar un ítem de una orden.
-    Procesa el formulario de edición de ítem.
-    Solo accesible para usuarios administradores.
-    """
+    """Edita producto de una orden."""
     item = get_object_or_404(OrderItem, pk=pk)
     
     if request.method == 'POST':
@@ -546,11 +441,7 @@ def edit_order_item(request, pk):
 
 @user_passes_test(is_admin)
 def delete_order_item(request, pk):
-    """
-    Vista para eliminar un ítem de una orden.
-    Muestra confirmación y procesa la eliminación.
-    Solo accesible para usuarios administradores.
-    """
+    """Elimina producto de una orden."""
     item = get_object_or_404(OrderItem, pk=pk)
     order = item.order
     
@@ -563,3 +454,52 @@ def delete_order_item(request, pk):
         'item': item,
         'order': order
     })
+
+@login_required
+def my_account(request):
+    """Gestiona perfil del usuario."""
+    customer = request.user.customer
+    
+    if request.method == 'POST':
+        # Actualizar usuario
+        user = request.user
+        user.first_name = request.POST.get('first_name')
+        user.last_name = request.POST.get('last_name')
+        user.email = request.POST.get('email')
+        user.save()
+        
+        # Actualizar cliente
+        customer.phone = request.POST.get('phone')
+        customer.address = request.POST.get('address')
+        customer.save()
+        
+        messages.success(request, "Your account information has been updated successfully!")
+        return redirect('my_account')
+    
+    context = {
+        'user': request.user,
+        'customer': customer
+    }
+    return render(request, 'store/my_account.html', context)
+
+@login_required
+def my_orders(request):
+    """Lista pedidos del usuario."""
+    customer = request.user.customer
+    orders = Order.objects.filter(customer=customer).order_by('-date_ordered')
+    
+    context = {
+        'orders': orders
+    }
+    return render(request, 'store/my_orders.html', context)
+
+@login_required
+def order_customer_detail(request, pk):
+    """Detalle de pedido específico."""
+    customer = request.user.customer
+    order = get_object_or_404(Order, pk=pk, customer=customer)  # Asegurar que el pedido pertenece al cliente
+    
+    context = {
+        'order': order
+    }
+    return render(request, 'store/order_customer_detail.html', context)
