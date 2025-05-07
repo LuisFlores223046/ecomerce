@@ -2,9 +2,16 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.models import User
+from django.http import JsonResponse
+from django.db import transaction
 from .models import Product, Category, Customer, Order, OrderItem
 from .forms import ProductForm, CategoryForm, LoginForm, RegistrationForm, OrderForm, OrderItemForm
 import time  # Para generar IDs de transacción
+import logging  # Para logging de debug
+
+# Configurar logging
+logger = logging.getLogger(__name__)
 
 # Función para verificar si un usuario es administrador
 def is_admin(user):
@@ -85,6 +92,14 @@ def add_to_cart(request, product_id):
     """Añade producto al carrito o incrementa cantidad."""
     product = get_object_or_404(Product, id=product_id)
     
+    # Verificar si hay suficiente stock
+    if product.stock <= 0 or not product.is_available:
+        messages.warning(request, f"Sorry, {product.name} is out of stock.")
+        # Redireccionar a la página anterior si existe
+        if request.META.get('HTTP_REFERER'):
+            return redirect(request.META.get('HTTP_REFERER'))
+        return redirect('store')
+    
     # Obtener o crear un pedido en estado pendiente para el usuario
     customer = request.user.customer
     order, created = Order.objects.get_or_create(
@@ -102,10 +117,20 @@ def add_to_cart(request, product_id):
     
     # Si el producto ya estaba en el carrito, aumentar la cantidad
     if not created:
-        order_item.quantity += 1
-        order_item.save()
+        # Verificar que no exceda el stock disponible
+        if order_item.quantity < product.stock:
+            order_item.quantity += 1
+            order_item.save()
+            messages.success(request, f"{product.name} added to your cart.")
+        else:
+            messages.warning(request, f"Sorry, we only have {product.stock} units of {product.name} available.")
+    else:
+        messages.success(request, f"{product.name} added to your cart.")
     
-    messages.success(request, f"{product.name} added to your cart.")
+    # Redireccionar a la página anterior si existe
+    if request.META.get('HTTP_REFERER'):
+        return redirect(request.META.get('HTTP_REFERER'))
+    
     return redirect('customer_product_detail', pk=product_id)
 
 @login_required
@@ -120,17 +145,22 @@ def update_cart(request, product_id, action):
         
         if order_item:
             if action == 'increase':
-                order_item.quantity += 1
+                # Verificar que no exceda el stock disponible
+                if order_item.quantity < product.stock:
+                    order_item.quantity += 1
+                    order_item.save()
+                    messages.success(request, "Cart updated successfully.")
+                else:
+                    messages.warning(request, f"Sorry, we only have {product.stock} units of {product.name} available.")
             elif action == 'decrease':
                 if order_item.quantity > 1:
                     order_item.quantity -= 1
+                    order_item.save()
+                    messages.success(request, "Cart updated successfully.")
                 else:
                     order_item.delete()
                     messages.success(request, f"{product.name} removed from your cart.")
                     return redirect('cart')
-            
-            order_item.save()
-            messages.success(request, "Cart updated successfully.")
     
     return redirect('cart')
 
@@ -175,14 +205,55 @@ def checkout(request):
     if request.method == 'POST':
         # Procesar la orden cuando se envía el formulario
         if order:
-            order.complete = True
-            order.status = 'processing'
-            order.transaction_id = f"TX-{int(time.time())}"  # Generar ID único basado en timestamp
-            order.shipping_address = request.POST.get('shipping_address', '')
-            order.save()
-            
-            messages.success(request, "Your order has been placed successfully!")
-            return redirect('store')
+            try:
+                # Usar transacción atómica para asegurar consistencia en las operaciones de DB
+                with transaction.atomic():
+                    # Verificar que todos los productos tengan stock suficiente
+                    inventory_issue = False
+                    order_items = OrderItem.objects.select_related('product').filter(order=order)
+                    
+                    for item in order_items:
+                        # Obtener producto fresco de la base de datos
+                        product = Product.objects.get(id=item.product.id)
+                        logger.info(f"Verificando producto: {product.name}, Stock actual: {product.stock}, Cantidad solicitada: {item.quantity}")
+                        
+                        if item.quantity > product.stock or not product.is_available:
+                            inventory_issue = True
+                            messages.warning(request, f"Sorry, {product.name} is no longer available in the quantity you requested. Available: {product.stock}")
+                    
+                    if inventory_issue:
+                        return redirect('cart')
+                    
+                    # Actualizar inventario reduciendo la cantidad de cada producto
+                    logger.info("Actualizando inventario...")
+                    for item in order_items:
+                        # Obtener producto fresco nuevamente para asegurar datos actualizados
+                        product = Product.objects.get(id=item.product.id)
+                        old_stock = product.stock
+                        product.stock = max(0, product.stock - item.quantity)  # Evitar negativos
+                        
+                        # Verificar si el producto se ha agotado
+                        if product.stock <= 0:
+                            product.is_available = False  # Marcar como no disponible
+                        
+                        product.save()
+                        logger.info(f"Producto: {product.name}, Stock anterior: {old_stock}, Stock nuevo: {product.stock}")
+                    
+                    # Completar el pedido
+                    order.complete = True
+                    order.status = 'processing'
+                    order.transaction_id = f"TX-{int(time.time())}"  # Generar ID único basado en timestamp
+                    order.shipping_address = request.POST.get('shipping_address', '')
+                    order.save()
+                    logger.info(f"Orden #{order.id} completada con éxito.")
+                    
+                    messages.success(request, "Your order has been placed successfully!")
+                    return redirect('store')
+                    
+            except Exception as e:
+                logger.error(f"Error en checkout: {str(e)}")
+                messages.error(request, "There was an error processing your order. Please try again.")
+                return redirect('cart')
     
     # Preparar datos para mostrar en la página de checkout
     if order:
@@ -219,6 +290,13 @@ def dashboard(request):
         'orders': orders
     }
     return render(request, 'store/dashboard/dashboard.html', context)
+
+# Nueva vista para listar usuarios
+@user_passes_test(is_admin)
+def user_list(request):
+    """Lista todos los usuarios registrados."""
+    users = User.objects.all().order_by('-date_joined')
+    return render(request, 'store/dashboard/user_list.html', {'users': users})
 
 # Product CRUD operations
 @user_passes_test(is_admin)
@@ -258,7 +336,11 @@ def product_update(request, pk):
     if request.method == 'POST':
         form = ProductForm(request.POST, request.FILES, instance=product)
         if form.is_valid():
-            form.save()
+            product = form.save()
+            # Asegurarnos de que si hay stock disponible, el producto esté marcado como disponible
+            if product.stock > 0 and not product.is_available:
+                product.is_available = True
+                product.save()
             messages.success(request, f'Product "{product.name}" updated successfully!')
             return redirect('product_detail', pk=product.pk)
     else:
@@ -367,13 +449,67 @@ def order_detail(request, pk):
 def order_update(request, pk):
     """Actualiza estado y dirección de orden."""
     order = get_object_or_404(Order, pk=pk)
+    old_status = order.status
     
     if request.method == 'POST':
         form = OrderForm(request.POST, instance=order)
         if form.is_valid():
-            form.save()
-            messages.success(request, f'Order #{order.id} updated successfully!')
-            return redirect('order_detail', pk=order.pk)
+            new_status = form.cleaned_data['status']
+            
+            try:
+                # Usar transacción atómica para asegurar consistencia
+                with transaction.atomic():
+                    # Si el pedido cambia de cancelado a otro estado, verificar disponibilidad de productos
+                    if old_status == 'cancelled' and new_status != 'cancelled':
+                        order_items = OrderItem.objects.select_related('product').filter(order=order)
+                        inventory_issue = False
+                        
+                        # Verificar disponibilidad de todos los productos
+                        for item in order_items:
+                            # Obtener producto fresco de la base de datos
+                            product = Product.objects.get(id=item.product.id)
+                            if product.stock < item.quantity:
+                                inventory_issue = True
+                                messages.warning(request, f"Not enough stock available for {product.name}. Available: {product.stock}")
+                        
+                        # Si hay problemas de inventario, no permitir el cambio
+                        if inventory_issue:
+                            return redirect('order_detail', pk=order.pk)
+                        
+                        # Si no hay problemas, reducir el inventario nuevamente
+                        for item in order_items:
+                            product = Product.objects.get(id=item.product.id)
+                            old_stock = product.stock
+                            product.stock = max(0, product.stock - item.quantity)  # Evitar negativos
+                            if product.stock <= 0:
+                                product.stock = 0
+                                product.is_available = False
+                            product.save()
+                            logger.info(f"Orden cambiada de cancelado: Producto {product.name}, Stock anterior: {old_stock}, Stock nuevo: {product.stock}")
+                    
+                    # Si el pedido está siendo cancelado, devolvemos los productos al inventario
+                    elif old_status != 'cancelled' and new_status == 'cancelled':
+                        order_items = OrderItem.objects.select_related('product').filter(order=order)
+                        for item in order_items:
+                            product = Product.objects.get(id=item.product.id)
+                            old_stock = product.stock
+                            product.stock += item.quantity
+                            product.is_available = True  # Hacer disponible de nuevo si se había agotado
+                            product.save()
+                            logger.info(f"Orden cancelada: Producto {product.name}, Stock anterior: {old_stock}, Stock nuevo: {product.stock}")
+                    
+                    form.save()
+                    messages.success(request, f'Order #{order.id} updated successfully!')
+                    
+                    # Si la solicitud es AJAX, devolver una respuesta JSON
+                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                        return JsonResponse({'status': 'success'})
+                    return redirect('order_detail', pk=order.pk)
+            
+            except Exception as e:
+                logger.error(f"Error al actualizar orden: {str(e)}")
+                messages.error(request, "There was an error updating the order status. Please try again.")
+                return redirect('order_detail', pk=order.pk)
     else:
         form = OrderForm(instance=order)
     
@@ -389,10 +525,28 @@ def order_delete(request, pk):
     order = get_object_or_404(Order, pk=pk)
     
     if request.method == 'POST':
-        order_id = order.id
-        order.delete()
-        messages.success(request, f'Order #{order_id} deleted successfully!')
-        return redirect('order_list')
+        try:
+            with transaction.atomic():
+                # Si se elimina una orden completada, restaurar el inventario
+                if order.complete and order.status != 'cancelled':
+                    order_items = OrderItem.objects.select_related('product').filter(order=order)
+                    for item in order_items:
+                        product = Product.objects.get(id=item.product.id)
+                        old_stock = product.stock
+                        product.stock += item.quantity
+                        product.is_available = True  # Hacer disponible de nuevo si se había agotado
+                        product.save()
+                        logger.info(f"Orden eliminada: Producto {product.name}, Stock anterior: {old_stock}, Stock nuevo: {product.stock}")
+                
+                order_id = order.id
+                order.delete()
+                messages.success(request, f'Order #{order_id} deleted successfully!')
+                return redirect('order_list')
+        
+        except Exception as e:
+            logger.error(f"Error al eliminar orden: {str(e)}")
+            messages.error(request, "There was an error deleting the order. Please try again.")
+            return redirect('order_detail', pk=order.pk)
     
     return render(request, 'store/dashboard/order_confirm_delete.html', {'order': order})
 
@@ -404,11 +558,40 @@ def add_order_item(request, pk):
     if request.method == 'POST':
         form = OrderItemForm(request.POST)
         if form.is_valid():
-            item = form.save(commit=False)  # No guardar inmediatamente
-            item.order = order  # Asignar la orden al ítem
-            item.save()  # Ahora guardar
-            messages.success(request, 'Item added to the order successfully!')
-            return redirect('order_detail', pk=order.pk)
+            product = form.cleaned_data['product']
+            quantity = form.cleaned_data['quantity']
+            
+            try:
+                with transaction.atomic():
+                    # Obtener producto fresco de la base de datos
+                    product = Product.objects.get(id=product.id)
+                    
+                    # Verificar si hay suficiente stock
+                    if product.stock < quantity and order.complete and order.status != 'cancelled':
+                        messages.warning(request, f"Not enough stock available for {product.name}. Available: {product.stock}")
+                        return redirect('order_detail', pk=order.pk)
+                    
+                    item = form.save(commit=False)  # No guardar inmediatamente
+                    item.order = order  # Asignar la orden al ítem
+                    item.save()  # Ahora guardar
+                    
+                    # Reducir el stock si la orden está completada y no cancelada
+                    if order.complete and order.status != 'cancelled':
+                        old_stock = product.stock
+                        product.stock = max(0, product.stock - quantity)  # Evitar negativos
+                        if product.stock <= 0:
+                            product.stock = 0
+                            product.is_available = False
+                        product.save()
+                        logger.info(f"Ítem añadido a orden completada: Producto {product.name}, Stock anterior: {old_stock}, Stock nuevo: {product.stock}")
+                    
+                    messages.success(request, 'Item added to the order successfully!')
+                    return redirect('order_detail', pk=order.pk)
+            
+            except Exception as e:
+                logger.error(f"Error al añadir ítem: {str(e)}")
+                messages.error(request, "There was an error adding the item to the order. Please try again.")
+                return redirect('order_detail', pk=order.pk)
     else:
         form = OrderItemForm()
     
@@ -422,13 +605,48 @@ def add_order_item(request, pk):
 def edit_order_item(request, pk):
     """Edita producto de una orden."""
     item = get_object_or_404(OrderItem, pk=pk)
+    old_quantity = item.quantity
+    order = item.order
     
     if request.method == 'POST':
         form = OrderItemForm(request.POST, instance=item)
         if form.is_valid():
-            form.save()
-            messages.success(request, 'Order item updated successfully!')
-            return redirect('order_detail', pk=item.order.pk)
+            new_quantity = form.cleaned_data['quantity']
+            product_id = form.cleaned_data['product'].id
+            
+            try:
+                with transaction.atomic():
+                    # Obtener producto fresco de la base de datos
+                    product = Product.objects.get(id=product_id)
+                    
+                    # Si la orden está completada y no cancelada, ajustar el inventario
+                    if order.complete and order.status != 'cancelled':
+                        quantity_difference = new_quantity - old_quantity
+                        
+                        # Verificar si hay suficiente stock para el aumento de cantidad
+                        if quantity_difference > 0 and product.stock < quantity_difference:
+                            messages.warning(request, f"Not enough stock available for {product.name}. Available: {product.stock}")
+                            return redirect('order_detail', pk=order.pk)
+                        
+                        # Ajustar el inventario
+                        old_stock = product.stock
+                        product.stock = max(0, product.stock - quantity_difference)  # Evitar negativos
+                        if product.stock <= 0:
+                            product.stock = 0
+                            product.is_available = False
+                        elif product.stock > 0:
+                            product.is_available = True
+                        product.save()
+                        logger.info(f"Ítem editado en orden completada: Producto {product.name}, Stock anterior: {old_stock}, Stock nuevo: {product.stock}")
+                    
+                    form.save()
+                    messages.success(request, 'Order item updated successfully!')
+                    return redirect('order_detail', pk=item.order.pk)
+            
+            except Exception as e:
+                logger.error(f"Error al editar ítem: {str(e)}")
+                messages.error(request, "There was an error updating the order item. Please try again.")
+                return redirect('order_detail', pk=order.pk)
     else:
         form = OrderItemForm(instance=item)
     
@@ -446,9 +664,26 @@ def delete_order_item(request, pk):
     order = item.order
     
     if request.method == 'POST':
-        item.delete()
-        messages.success(request, 'Order item removed successfully!')
-        return redirect('order_detail', pk=order.pk)
+        try:
+            with transaction.atomic():
+                # Si la orden está completada y no cancelada, restaurar el inventario
+                if order.complete and order.status != 'cancelled':
+                    # Obtener producto fresco de la base de datos
+                    product = Product.objects.get(id=item.product.id)
+                    old_stock = product.stock
+                    product.stock += item.quantity
+                    product.is_available = True  # Hacer disponible de nuevo
+                    product.save()
+                    logger.info(f"Ítem eliminado de orden completada: Producto {product.name}, Stock anterior: {old_stock}, Stock nuevo: {product.stock}")
+                
+                item.delete()
+                messages.success(request, 'Order item removed successfully!')
+                return redirect('order_detail', pk=order.pk)
+        
+        except Exception as e:
+            logger.error(f"Error al eliminar ítem: {str(e)}")
+            messages.error(request, "There was an error removing the order item. Please try again.")
+            return redirect('order_detail', pk=order.pk)
     
     return render(request, 'store/dashboard/order_item_confirm_delete.html', {
         'item': item,
@@ -498,7 +733,6 @@ def order_customer_detail(request, pk):
     """Detalle de pedido específico."""
     customer = request.user.customer
     order = get_object_or_404(Order, pk=pk, customer=customer)  # Asegurar que el pedido pertenece al cliente
-    
     context = {
         'order': order
     }

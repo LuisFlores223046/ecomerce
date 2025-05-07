@@ -35,6 +35,9 @@ admin_urlpatterns = [
     path('admin-dashboard/categories/<int:pk>/', views.category_detail, name="category_detail"),
     path('admin-dashboard/categories/<int:pk>/edit/', views.category_update, name="category_update"),
     path('admin-dashboard/categories/<int:pk>/delete/', views.category_delete, name="category_delete"),
+    
+    # Nuevo: Administración de usuarios
+    path('admin-dashboard/users/', views.user_list, name="user_list"),
 ]
 
 # URLs para el panel de administración de órdenes
