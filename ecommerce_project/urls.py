@@ -18,10 +18,24 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.static import serve
+import os
 
 urlpatterns = [
     path('admin/', admin.site.urls),  # Admin de Django
     path('', include('store.urls')),  # Incluye todas las URLs de la app store
 ]
 
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Configuración para servir archivos media tanto en desarrollo como en producción
+if settings.DEBUG:
+    # En desarrollo, Django puede servir archivos media directamente
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+else:
+    # En producción, necesitamos configurar manualmente la URL para archivos media
+    # Esta configuración trabajará con la estructura de carpetas propuesta 
+    # (media dentro de staticfiles)
+    urlpatterns += [
+        path('media/<path:path>', serve, {
+            'document_root': os.path.join(settings.BASE_DIR, 'media'),
+        }),
+    ]
