@@ -118,10 +118,14 @@ STATIC_URL = 'static/'
 if not DEBUG:
     STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
     STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
-# Media files (Uploaded images)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+    
+    # Esta es la clave: en producción, configuramos MEDIA_ROOT dentro de STATIC_ROOT
+    MEDIA_ROOT = os.path.join(STATIC_ROOT, 'media')
+    MEDIA_URL = '/static/media/'
+else:
+    # En desarrollo mantenemos la configuración normal
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
