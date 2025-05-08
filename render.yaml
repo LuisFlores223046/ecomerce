@@ -2,7 +2,7 @@ services:
   - type: web
     name: coffeeshop
     runtime: python
-    buildCommand: "./build.sh"
+    buildCommand: "chmod +x build.sh && ./build.sh"
     startCommand: "gunicorn ecommerce_project.wsgi:application"
     envVars:
       - key: DATABASE_URL
@@ -16,7 +16,9 @@ services:
       - key: WEB_CONCURRENCY
         value: 4
       - key: DEBUG
-        value: False
+        value: "False"
+      - key: PORT
+        value: 8001
 
 databases:
   - name: coffeeshop-db
